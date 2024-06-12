@@ -13,6 +13,8 @@ using VRage.Game.GUI.TextPanel;
 using VRage.Game.ModAPI.Ingame;
 using VRage.Game.ObjectBuilders.Definitions;
 using SpaceEngineers.Game.ModAPI.Ingame;
+using System.Collections.Generic;
+using System.Text;
 
 /*
  * Must be unique per each script project.
@@ -21,45 +23,62 @@ using SpaceEngineers.Game.ModAPI.Ingame;
  */
 namespace MyBatteryController {
 
-/*
- * Do not change this declaration because this is the game requirement.
- */
-public sealed class Program : MyGridProgram {
-
     /*
-     * Must be same as the namespace. Will be used for automatic script export.
-     * The code inside this region is the ingame script.
+     * Do not change this declaration because this is the game requirement.
      */
-    #region MyBatteryController
+    public sealed class Program : MyGridProgram {
 
-    /*
-     * The constructor, called only once every session and always before any 
-     * other method is called. Use it to initialize your script. 
-     *    
-     * The constructor is optional and can be removed if not needed.
-     *
-     * It's recommended to set RuntimeInfo.UpdateFrequency here, which will 
-     * allow your script to run itself without a timer block.
-     */
-    public Program() {}
+        /*
+         * Must be same as the namespace. Will be used for automatic script export.
+         * The code inside this region is the ingame script.
+         */
+        #region MyBatteryController
 
-    /*
-     * Called when the program needs to save its state. Use this method to save
-     * your state to the Storage field or some other means. 
-     * 
-     * This method is optional and can be removed if not needed.
-     */
-    public void Save() {}
+        List<IMyBatteryBlock> batteries = new List<IMyBatteryBlock>();
+        List<IMyTextPanel> textPanels = new List<IMyTextPanel>();
+        float CurrentStoredPower = 0.0f;
+        float MaxStoredPower = 1.0f;
 
-    /*
-     * The main entry point of the script, invoked every time one of the 
-     * programmable block's Run actions are invoked, or the script updates 
-     * itself. The updateSource argument describes where the update came from.
-     * 
-     * The method itself is required, but the arguments above can be removed 
-     * if not needed.
-     */
-    public void Main(string argument, UpdateType updateSource) {}
+        float getChargedRatio() {
+            if (MaxStoredPower == 0f) {
+                return -1;
+            }
+            return CurrentStoredPower / MaxStoredPower;
+        }
 
-    #endregion // MyBatteryController
-}}
+        public void init() {
+            GridTerminalSystem.GetBlocksOfType(batteries);
+            GridTerminalSystem.GetBlocksOfType(textPanels);
+        }
+        public void update() {
+            CurrentStoredPower = 0f;
+            MaxStoredPower = 0f;
+            foreach (IMyBatteryBlock battery in batteries) {
+                CurrentStoredPower += battery.CurrentStoredPower;
+                MaxStoredPower += battery.MaxStoredPower;
+            }
+            Print();
+        }
+        public void Print() {
+            foreach(var textPanel in textPanels){
+                string now=textPanel.GetPublicTitle();
+                
+            }
+        }
+        public Program() {
+            init();
+            Echo(batteries[0].MaxStoredPower.ToString());
+        }
+
+        public void Save() { }
+
+
+        public void Main(string argument, UpdateType updateSource) {
+            if ((updateSource & UpdateType.Update100) != 0) {
+                update();
+            }
+        }
+
+        #endregion // MyBatteryController
+    }
+}

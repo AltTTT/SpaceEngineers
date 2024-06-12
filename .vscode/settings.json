@@ -4,5 +4,6 @@
     "obj/": true,
     "SpaceEngineers.sln": true
   },
-  "dotnet.server.useOmnisharp": true
+  "dotnet.server.useOmnisharp": true,
+  "editor.formatOnSave": true
 }
