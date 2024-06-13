@@ -34,46 +34,74 @@ namespace MyBaseController {
         #region MyBaseController
         public class BeanProvider {
 
-            private interface IBean {
-                public void Init(IMyGridTerminalSystem gridTerminalSystem);
+            #region Repository
+            private interface IRepository {
+                public void Load(IMyGridTerminalSystem gridTerminalSystem);
+            }
+            //Repositories
+
+            private class BatteryRepository : IRepository {
+                private readonly List<IMyBatteryBlock> _batteries = new List<IMyBatteryBlock>();
+                public List<IMyBatteryBlock> Batteries { get { return _batteries; } }
+                public void Load(IMyGridTerminalSystem gridTerminalSystem) {
+                    gridTerminalSystem.GetBlocksOfType(Batteries);
+                }
+            }
+            private class TextPanelRepository : IRepository {
+                private readonly List<IMyTextPanel> _textPanels = new List<IMyTextPanel>();
+
+                public List<IMyTextPanel> TextPanels { get { return _textPanels; } }
+                public void Load(IMyGridTerminalSystem gridTerminalSystem) {
+                    gridTerminalSystem.GetBlocksOfType(_textPanels);
+                }
+
+            }
+            private List<IRepository> _repositories = new List<IRepository>();
+
+            //Initialize Repositories
+            public void initRepositories() {
+                _repositories.Add(new BatteryRepository());
+                _repositories.Add(new TextPanelRepository());
+            }
+            #endregion Repository
+            #region  Service
+
+            //Service
+            private interface IService {
                 public void Update();
             }
-            private interface IRepository : IBean {
-
-            }
-            private interface IService : IBean {
-
-            }
-            private interface IController : IBean {
-
-            }
-
-            private List<IRepository> repositories;
-            private class BatteryRepository : IRepository {
-                private readonly List<IMyBatteryBlock> batteries = new List<IMyBatteryBlock>();
-
-                private float CurrentStoredPower = 0f;
-                private float MaxStoredPower = 1f;
+            private class BatteryService : IService {
+                private readonly BatteryRepository _repository;
+                private float _currentStoredPower = 0f;
+                private float _maxStoredPower = 1f;
                 public float StoredPowerRatio {
                     get {
-                        if (MaxStoredPower == 0f) {
+                        if (_maxStoredPower == 0f) {
                             return -1f;
                         }
-                        return CurrentStoredPower / MaxStoredPower;
+                        return _currentStoredPower / _maxStoredPower;
                     }
                 }
-                public void Init(IMyGridTerminalSystem gridTerminalSystem) {
-                    gridTerminalSystem.GetBlocksOfType(batteries);
+                public BatteryService(BatteryRepository repository) {
+                    _repository = repository;
                 }
                 public void Update() {
-                    CurrentStoredPower = 0f;
-                    MaxStoredPower = 0f;
-                    foreach (var battery in batteries) {
-                        CurrentStoredPower += battery.CurrentStoredPower;
-                        MaxStoredPower += battery.MaxStoredPower;
+                    _currentStoredPower = 0f;
+                    _maxStoredPower = 0f;
+                    foreach (var battery in _repository.Batteries) {
+                        _currentStoredPower += battery.CurrentStoredPower;
+                        _maxStoredPower += battery.MaxStoredPower;
                     }
                 }
+
             }
+            #endregion Service
+            #region  Controller
+            private interface IController {
+                public void Apply();
+            }
+            #endregion Controller
+
         }
 
         public Program() { }
