@@ -19,6 +19,9 @@ using System.Text;
 using Sandbox.Game.Screens.ViewModels;
 using System.Data;
 using System.Collections.Immutable;
+using Sandbox.Game.Entities.Blocks;
+using System.ComponentModel.Design;
+using System.Linq;
 
 /*
  * Must be unique per each script project.
@@ -37,6 +40,35 @@ namespace MyBaseController {
          * The code inside this region is the ingame script.
          */
         #region MyBaseController
+
+        //util
+        private static string[] readlines(string s) {
+            return s.Replace("\r\n", "\n").Split(new[] { '\n', '\r' });
+        }
+        //const
+        public static readonly string[] ComponentSubtypeIds ={
+            "BulletproofGlass",
+            "Canvas",
+            "Computer",
+            "Construction",
+            "Detector",
+            "Display",
+            "Girder",
+            "GravityGenerator",
+            "InteriorPlate",
+            "LargeTube",
+            "Medical",
+            "MetalGrid",
+            "Motor",
+            "PowerCell",
+            "RadioCommunication",
+            "Reactor",
+            "SmallTube",
+            "SolarCell",
+            "SteelPlate",
+            "Superconductor",
+            "Thrust",
+        };
         public class BeanProvider {
             //Repository
             #region Repository
@@ -85,6 +117,23 @@ namespace MyBaseController {
                 }
             }
 
+            private class CustomDatarRepository : IRepository {
+                private IMyProgrammableBlock _me;
+
+                public void Load(Program program) {
+                    _me = program.Me;
+                }
+
+                public string CustomData {
+                    get {
+                        return _me.CustomData;
+                    }
+                    set {
+                        _me.CustomData = value;
+                    }
+                }
+            }
+
             private class CargoContainerRepository : IRepository {
                 private readonly List<IMyCargoContainer> _cargos = new List<IMyCargoContainer>();
                 public ImmutableList<IMyCargoContainer> CargoContainers {
@@ -104,6 +153,8 @@ namespace MyBaseController {
             private TextPanelRepository _textPanelRepository;
             private CargoContainerRepository _cargoContainerRepository;
 
+            private CustomDatarRepository _customDataRepository;
+
             private TerminalBlockWithInventoryRepository _terminalBlockWithInventoryRepository;
             public void initRepositories() {
                 _batteryRepository = new BatteryRepository();
@@ -114,6 +165,8 @@ namespace MyBaseController {
                 _repositories.Add(_terminalBlockWithInventoryRepository);
                 _cargoContainerRepository = new CargoContainerRepository();
                 _repositories.Add(_cargoContainerRepository);
+                _customDataRepository = new CustomDatarRepository();
+                _repositories.Add(_customDataRepository);
             }
             //method
             public void LoadAllRepository(Program program) {
@@ -188,7 +241,7 @@ namespace MyBaseController {
                 public void Update(Program program) {
                     foreach (var textPanel in _repository.TextPanels) {
                         var cData = textPanel.CustomData;
-                        string[] lines = cData.Replace("\r\n", "\n").Split(new[] { '\n', '\r' });
+                        string[] lines = readlines(cData);
                         StringBuilder sb = new StringBuilder();
                         foreach (var line in lines) {
                             if (map.ContainsKey(line))
@@ -274,13 +327,46 @@ namespace MyBaseController {
                     */
                 }
             }
+            private class CustomDataService : IService {
+                private CustomDatarRepository _repository;
+                public CustomDataService(CustomDatarRepository repository) {
+                    _repository = repository;
+                }
+                private Dictionary<string, int> _map = new Dictionary<string, int>();
+
+                public ImmutableDictionary<string, int> ComponentList {
+                    get {
+                        return ImmutableDictionary.ToImmutableDictionary(_map);
+                    }
+                }
+                public void Update(Program program) {
+                    _map.Clear();
+                    foreach (var line in readlines(_repository.CustomData)) {
+                        var p = line.Split('=');
+                        if (p.Count() > 1) {
+                            _map.Add(p[0], int.Parse(p[1]));
+                        }
+                    }
+                }
+                public void init() {
+                    StringBuilder sb = new StringBuilder();
+                    foreach (var subtypeId in ComponentSubtypeIds) {
+                        sb.AppendLine(subtypeId + "=0");
+                    }
+                    _repository.CustomData = sb.ToString();
+                }
+            }
+
             //Initialize Services
+
             private List<IService> _services = new List<IService>();
 
             private BatteryService _batteryService;
             private CargoContainerService _cargoContainerService;
             private TextPanelService _textPanelService;
             private ItemListService _itemListService;
+
+            private CustomDataService _customDataService;
 
 
             public void initServices() {
@@ -292,6 +378,8 @@ namespace MyBaseController {
                 _services.Add(_itemListService);
                 _cargoContainerService = new CargoContainerService(_cargoContainerRepository);
                 _services.Add(_cargoContainerService);
+                _customDataService = new CustomDataService(_customDataRepository);
+                _services.Add(_customDataService);
             }
             //method
             public void UpdateAllService(Program program) {
@@ -350,9 +438,14 @@ namespace MyBaseController {
             private class ItemListController : IController {
                 private ItemListService _service;
                 private TextPanelService _textPanelService;
-                public ItemListController(ItemListService service, TextPanelService textPanelService) {
+                private CustomDataService _customDataService;
+                public ItemListController(
+                    ItemListService service,
+                    TextPanelService textPanelService,
+                    CustomDataService customDataService) {
                     _service = service;
                     _textPanelService = textPanelService;
+                    _customDataService = customDataService;
                 }
                 public void Apply(Program program) {
                     StringBuilder sb = new StringBuilder();
@@ -369,8 +462,16 @@ namespace MyBaseController {
                     _textPanelService.send("Ore", sb.ToString());
                     sb.Clear();
                     sb.AppendLine("--Components--");
-                    foreach (var p in _service.Components) {
-                        sb.AppendLine(p.Key + ":" + p.Value.ToIntSafe());
+                    foreach (var subtypeId in ComponentSubtypeIds) {
+                        int value = 0;
+                        if (_service.Components.ContainsKey(subtypeId)) {
+                            value = _service.Components[subtypeId].ToIntSafe();
+                        }
+                        int maxValue = 0;
+                        if (_customDataService.ComponentList.ContainsKey(subtypeId)) {
+                            maxValue = _customDataService.ComponentList[subtypeId];
+                        }
+                        sb.AppendLine(subtypeId + ":" + value + "/" + maxValue);
                     }
                     _textPanelService.send("Component", sb.ToString());
                 }
@@ -380,7 +481,7 @@ namespace MyBaseController {
             List<IController> _controllers = new List<IController>();
             public void initControllers() {
                 _controllers.Add(new BatteryController(_batteryService, _textPanelService));
-                _controllers.Add(new ItemListController(_itemListService, _textPanelService));
+                _controllers.Add(new ItemListController(_itemListService, _textPanelService, _customDataService));
                 _controllers.Add(new CargoContainerController(_cargoContainerService, _textPanelService));
             }
             //method
@@ -390,6 +491,50 @@ namespace MyBaseController {
                 }
             }
             #endregion Controller
+            #region QueryExecuter
+            private interface QueryExecuter {
+                void Exec();
+            }
+
+            private class CustomDataInitializer : QueryExecuter {
+                private CustomDataService _service;
+
+                public CustomDataInitializer(CustomDataService service) {
+                    _service = service;
+                }
+                public void Exec() {
+                    _service.init();
+                }
+
+            }
+            CustomDataInitializer _customDataInitializer;
+            Dictionary<string, QueryExecuter> _queryExecuters = new Dictionary<string, QueryExecuter>();
+            public void InitQueryExcecuter() {
+                _customDataInitializer = new CustomDataInitializer(_customDataService);
+                _queryExecuters.Add("initCustomData", _customDataInitializer);
+            }
+            public void ExecQuery(Program program, string query) {
+                if (_queryExecuters.ContainsKey(query)) {
+                    _queryExecuters[query].Exec();
+                } else {
+                    program.Echo("invalid query");
+                }
+            }
+            #endregion QueryExecuter
+
+            public void InitAll(Program program) {
+                initRepositories();
+                initServices();
+                initControllers();
+                InitQueryExcecuter();
+
+                LoadAllRepository(program);
+            }
+
+            public void UpdateAll(Program program) {
+                UpdateAllService(program);
+                ApplyAllController(program);
+            }
 
         }
 
@@ -399,12 +544,7 @@ namespace MyBaseController {
         private BeanProvider _beanProvider;
         public Program() {
             _beanProvider = new BeanProvider();
-
-            _beanProvider.initRepositories();
-            _beanProvider.initServices();
-            _beanProvider.initControllers();
-
-            _beanProvider.LoadAllRepository(this);
+            _beanProvider.InitAll(this);
 
             Runtime.UpdateFrequency = UpdateFrequency.Update100;
 
@@ -417,8 +557,9 @@ namespace MyBaseController {
 
         public void Main(string argument, UpdateType updateSource) {
             if ((updateSource & UpdateType.Update100) != 0) {
-                _beanProvider.UpdateAllService(this);
-                _beanProvider.ApplyAllController(this);
+                _beanProvider.UpdateAll(this);
+            } else if ((updateSource & UpdateType.Terminal) != 0) {
+                _beanProvider.ExecQuery(this, argument);
             }
         }
 
