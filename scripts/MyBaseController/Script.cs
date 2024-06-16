@@ -22,6 +22,11 @@ using System.Collections.Immutable;
 using Sandbox.Game.Entities.Blocks;
 using System.ComponentModel.Design;
 using System.Linq;
+using Sandbox.Definitions;
+using Sandbox.Game.GUI;
+using VRage.ObjectBuilders;
+using Sandbox.Game.Gui;
+using Sandbox.Game;
 
 /*
  * Must be unique per each script project.
@@ -44,6 +49,26 @@ namespace MyBaseController {
         //util
         private static string[] readlines(string s) {
             return s.Replace("\r\n", "\n").Split(new[] { '\n', '\r' });
+        }
+        private static string subTypeIdToSubTypeIdForBluePrint(string subTypeId) {
+            switch (subTypeId) {
+                case "Motor":
+                case "Computer":
+                case "Construction":
+                case "Detector":
+                case "Girder":
+                case "GravityGenerator":
+                case "Medical":
+                case "RadioCommunication":
+                case "Reactor":
+                case "Thrust":
+                    subTypeId += "Component";
+                    break;
+                case "Canvas":
+                    subTypeId = "Position0030_Canvas";
+                    break;
+            }
+            return subTypeId;
         }
         //const
         public static readonly string[] ComponentSubtypeIds ={
@@ -119,18 +144,12 @@ namespace MyBaseController {
 
             private class CustomDatarRepository : IRepository {
                 private IMyProgrammableBlock _me;
-
                 public void Load(Program program) {
                     _me = program.Me;
                 }
-
                 public string CustomData {
-                    get {
-                        return _me.CustomData;
-                    }
-                    set {
-                        _me.CustomData = value;
-                    }
+                    get { return _me.CustomData; }
+                    set { _me.CustomData = value; }
                 }
             }
 
@@ -147,13 +166,29 @@ namespace MyBaseController {
                 }
 
             }
+            private class AssemblerRepository : IRepository {
+                List<IMyAssembler> _assemblers = new List<IMyAssembler>();
+
+                public ImmutableList<IMyAssembler> Assemblers {
+                    get {
+                        return ImmutableList.ToImmutableList(_assemblers);
+                    }
+                }
+                public void Load(Program program) {
+                    program.GridTerminalSystem.GetBlocksOfType(
+                        _assemblers,
+                        assembler => assembler.IsSameConstructAs(program.Me)
+                    );
+                }
+
+            }
             //Initialize Repositories
             private List<IRepository> _repositories = new List<IRepository>();
             private BatteryRepository _batteryRepository;
             private TextPanelRepository _textPanelRepository;
             private CargoContainerRepository _cargoContainerRepository;
-
             private CustomDatarRepository _customDataRepository;
+            private AssemblerRepository _assemblerRepository;
 
             private TerminalBlockWithInventoryRepository _terminalBlockWithInventoryRepository;
             public void initRepositories() {
@@ -167,6 +202,8 @@ namespace MyBaseController {
                 _repositories.Add(_cargoContainerRepository);
                 _customDataRepository = new CustomDatarRepository();
                 _repositories.Add(_customDataRepository);
+                _assemblerRepository = new AssemblerRepository();
+                _repositories.Add(_assemblerRepository);
             }
             //method
             public void LoadAllRepository(Program program) {
@@ -356,7 +393,42 @@ namespace MyBaseController {
                     _repository.CustomData = sb.ToString();
                 }
             }
+            private class AssemblerService : IService {
+                AssemblerRepository _repository;
 
+                public AssemblerService(AssemblerRepository repository) {
+                    _repository = repository;
+                }
+                private IMyAssembler _mainAssembler;
+                public IMyAssembler MainAssembler {
+                    get { return _mainAssembler; }
+                }
+                private Dictionary<string, MyFixedPoint> _queuedItems = new Dictionary<string, MyFixedPoint>();
+                public ImmutableDictionary<string, MyFixedPoint> QueuedItems {
+                    get {
+                        return ImmutableDictionary.ToImmutableDictionary(_queuedItems);
+                    }
+                }
+                private List<MyProductionItem> _items = new List<MyProductionItem>();
+                public void Update(Program program) {
+                    _queuedItems.Clear();
+                    foreach (var a in _repository.Assemblers) {
+                        if (!a.CooperativeMode) {
+                            _mainAssembler = a;
+                        }
+                        _items.Clear();
+                        a.GetQueue(_items);
+                        foreach (var item in _items) {
+                            if (_queuedItems.ContainsKey(item.BlueprintId.SubtypeId.ToString())) {
+                                _queuedItems[item.BlueprintId.SubtypeId.ToString()] += item.Amount;
+                            } else {
+                                _queuedItems.Add(item.BlueprintId.SubtypeId.ToString(), item.Amount);
+                            }
+                        }
+                    }
+                }
+
+            }
             //Initialize Services
 
             private List<IService> _services = new List<IService>();
@@ -367,6 +439,7 @@ namespace MyBaseController {
             private ItemListService _itemListService;
 
             private CustomDataService _customDataService;
+            private AssemblerService _assemblerService;
 
 
             public void initServices() {
@@ -380,6 +453,8 @@ namespace MyBaseController {
                 _services.Add(_cargoContainerService);
                 _customDataService = new CustomDataService(_customDataRepository);
                 _services.Add(_customDataService);
+                _assemblerService = new AssemblerService(_assemblerRepository);
+                _services.Add(_assemblerService);
             }
             //method
             public void UpdateAllService(Program program) {
@@ -477,12 +552,51 @@ namespace MyBaseController {
                 }
 
             }
+            private class AssemblerController : IController {
+                AssemblerService _assemblerService;
+                ItemListService _itemListService;
+                CustomDataService _customDataService;
+
+                public AssemblerController(
+                    AssemblerService assemblerService,
+                    ItemListService itemListService,
+                    CustomDataService customDataService
+                ) {
+                    _assemblerService = assemblerService;
+                    _itemListService = itemListService;
+                    _customDataService = customDataService;
+                }
+                public void Apply(Program program) {
+                    foreach (var subtypeId in ComponentSubtypeIds) {
+                        if (
+                         _customDataService.ComponentList.ContainsKey(subtypeId)
+                        ) {
+
+                            MyFixedPoint shortage = _customDataService.ComponentList[subtypeId];
+                            if (_itemListService.Components.ContainsKey(subtypeId)) {
+                                shortage -= _itemListService.Components[subtypeId];
+                            }
+                            if (_assemblerService.QueuedItems.ContainsKey(subTypeIdToSubTypeIdForBluePrint(subtypeId))) {
+                                shortage -= _assemblerService.QueuedItems[subTypeIdToSubTypeIdForBluePrint(subtypeId)];
+                            }
+
+                            if (shortage > 0) {
+                                MyDefinitionId id = MyDefinitionId.Parse(
+                                    "MyObjectBuilder_BlueprintDefinition/" + subTypeIdToSubTypeIdForBluePrint(subtypeId));
+                                _assemblerService.MainAssembler.AddQueueItem(id, shortage);
+                            }
+                        }
+                    }
+                }
+
+            }
             //initialize Controllers
             List<IController> _controllers = new List<IController>();
             public void initControllers() {
                 _controllers.Add(new BatteryController(_batteryService, _textPanelService));
                 _controllers.Add(new ItemListController(_itemListService, _textPanelService, _customDataService));
                 _controllers.Add(new CargoContainerController(_cargoContainerService, _textPanelService));
+                _controllers.Add(new AssemblerController(_assemblerService, _itemListService, _customDataService));
             }
             //method
             public void ApplyAllController(Program program) {
