@@ -48,10 +48,12 @@ namespace MyBaseController {
 
             private class BatteryRepository : IRepository {
                 private readonly List<IMyBatteryBlock> _batteries = new List<IMyBatteryBlock>();
-                public List<IMyBatteryBlock> Batteries { get { return _batteries; } }
+                public ImmutableList<IMyBatteryBlock> Batteries {
+                    get { return ImmutableList.ToImmutableList(_batteries); }
+                }
                 public void Load(Program program) {
                     program.GridTerminalSystem.GetBlocksOfType(
-                        Batteries,
+                        _batteries,
                         battery => battery.IsSameConstructAs(program.Me)
                     );
                 }
@@ -59,7 +61,9 @@ namespace MyBaseController {
             private class TextPanelRepository : IRepository {
                 private readonly List<IMyTextPanel> _textPanels = new List<IMyTextPanel>();
 
-                public List<IMyTextPanel> TextPanels { get { return _textPanels; } }
+                public ImmutableList<IMyTextPanel> TextPanels {
+                    get { return ImmutableList.ToImmutableList(_textPanels); }
+                }
                 public void Load(Program program) {
                     program.GridTerminalSystem.GetBlocksOfType(
                         _textPanels,
@@ -71,17 +75,34 @@ namespace MyBaseController {
 
             private class TerminalBlockWithInventoryRepository : IRepository {
                 private readonly List<IMyTerminalBlock> _terminalBlocks = new List<IMyTerminalBlock>();
-                public List<IMyTerminalBlock> TerminalBlocks { get { return _terminalBlocks; } }
+                public ImmutableList<IMyTerminalBlock> TerminalBlocks {
+                    get { return ImmutableList.ToImmutableList(_terminalBlocks); }
+                }
                 public void Load(Program program) {
                     program.GridTerminalSystem.GetBlocksOfType(
                         _terminalBlocks,
                         b => b.IsSameConstructAs(program.Me) && b.HasInventory);
                 }
             }
+
+            private class CargoContainerRepository : IRepository {
+                private readonly List<IMyCargoContainer> _cargos = new List<IMyCargoContainer>();
+                public ImmutableList<IMyCargoContainer> CargoContainers {
+                    get { return ImmutableList.ToImmutableList(_cargos); }
+                }
+                public void Load(Program program) {
+                    program.GridTerminalSystem.GetBlocksOfType(
+                        _cargos,
+                        cargo => cargo.IsSameConstructAs(program.Me)
+                    );
+                }
+
+            }
             //Initialize Repositories
             private List<IRepository> _repositories = new List<IRepository>();
             private BatteryRepository _batteryRepository;
             private TextPanelRepository _textPanelRepository;
+            private CargoContainerRepository _cargoContainerRepository;
 
             private TerminalBlockWithInventoryRepository _terminalBlockWithInventoryRepository;
             public void initRepositories() {
@@ -91,6 +112,8 @@ namespace MyBaseController {
                 _repositories.Add(_textPanelRepository);
                 _terminalBlockWithInventoryRepository = new TerminalBlockWithInventoryRepository();
                 _repositories.Add(_terminalBlockWithInventoryRepository);
+                _cargoContainerRepository = new CargoContainerRepository();
+                _repositories.Add(_cargoContainerRepository);
             }
             //method
             public void LoadAllRepository(Program program) {
@@ -128,12 +151,39 @@ namespace MyBaseController {
                         _maxStoredPower += battery.MaxStoredPower;
                     }
                 }
+            }
+            private class CargoContainerService : IService {
+                private readonly CargoContainerRepository _repository;
+                public CargoContainerService(CargoContainerRepository repository) {
+                    _repository = repository;
+                }
+
+                private MyFixedPoint _currentVolume = 0;
+                private MyFixedPoint _maxVolume = 1;
+                public float VolumeRatio {
+                    get {
+                        if (_maxVolume == 0) {
+                            return -1;
+                        }
+                        return (float)_currentVolume.RawValue / _maxVolume.RawValue;
+                    }
+                }
+                public void Update(Program program) {
+                    _currentVolume = 0;
+                    _maxVolume = 0;
+                    foreach (var cargo in _repository.CargoContainers) {
+                        IMyInventory inventory = cargo.GetInventory();
+                        _currentVolume += inventory.CurrentVolume;
+                        _maxVolume += inventory.MaxVolume;
+                    }
+                }
 
             }
             private class TextPanelService : IService {
                 private readonly TextPanelRepository _repository;
                 public TextPanelService(TextPanelRepository repository) {
                     _repository = repository;
+                    send("", "\n");
                 }
                 public void Update(Program program) {
                     foreach (var textPanel in _repository.TextPanels) {
@@ -211,6 +261,7 @@ namespace MyBaseController {
                             }
                         }
                     }
+                    /*
                     foreach (var p in _ingots) {
                         program.Echo(p.ToString());
                     }
@@ -220,17 +271,17 @@ namespace MyBaseController {
                     foreach (var p in _components) {
                         program.Echo(p.ToString());
                     }
-
+                    */
                 }
-
             }
             //Initialize Services
             private List<IService> _services = new List<IService>();
 
             private BatteryService _batteryService;
+            private CargoContainerService _cargoContainerService;
             private TextPanelService _textPanelService;
-
             private ItemListService _itemListService;
+
 
             public void initServices() {
                 _batteryService = new BatteryService(_batteryRepository);
@@ -239,6 +290,8 @@ namespace MyBaseController {
                 _services.Add(_textPanelService);
                 _itemListService = new ItemListService(_terminalBlockWithInventoryRepository);
                 _services.Add(_itemListService);
+                _cargoContainerService = new CargoContainerService(_cargoContainerRepository);
+                _services.Add(_cargoContainerService);
             }
             //method
             public void UpdateAllService(Program program) {
@@ -252,6 +305,22 @@ namespace MyBaseController {
             private interface IController {
                 void Apply(Program program);
             }
+            //util
+            private static string MakeGauge(string name, float fRatio) {
+                StringBuilder sb = new StringBuilder();
+                int ratio = (int)Math.Round(fRatio * 100);
+                sb.AppendLine(name + " : " + ratio + "%");
+                sb.Append("[");
+                int i = 0;
+                for (; i < ratio / 10; i++) {
+                    sb.Append("#");
+                }
+                for (; i < 10; i++) {
+                    sb.Append(" ");
+                }
+                sb.AppendLine("]");
+                return sb.ToString();
+            }
             //Controllers
             private class BatteryController : IController {
                 private BatteryService _batteryService;
@@ -261,25 +330,58 @@ namespace MyBaseController {
                     _textPanelService = textPanelService;
                 }
                 public void Apply(Program program) {
-                    int ratio = (int)Math.Round(_batteryService.StoredPowerRatio * 100);
-                    StringBuilder sb = new StringBuilder();
-                    sb.AppendLine("Battery : " + ratio + "%");
-                    sb.Append("[");
-                    int i = 0;
-                    for (; i < ratio / 10; i++) {
-                        sb.Append("#");
-                    }
-                    for (; i < 10; i++) {
-                        sb.Append(" ");
-                    }
-                    sb.AppendLine("]");
-                    _textPanelService.send("Battery", sb.ToString());
+                    _textPanelService.send("Battery", MakeGauge("Battery", _batteryService.StoredPowerRatio));
                 }
+            }
+            private class CargoContainerController : IController {
+                private CargoContainerService _cargoContainerService;
+                private TextPanelService _textPanelService;
+
+                public CargoContainerController(CargoContainerService cargoContainerService,
+                TextPanelService textPanelService) {
+                    _cargoContainerService = cargoContainerService;
+                    _textPanelService = textPanelService;
+                }
+                public void Apply(Program program) {
+                    _textPanelService.send("Cargo",
+                    MakeGauge("Cargo", _cargoContainerService.VolumeRatio));
+                }
+            }
+            private class ItemListController : IController {
+                private ItemListService _service;
+                private TextPanelService _textPanelService;
+                public ItemListController(ItemListService service, TextPanelService textPanelService) {
+                    _service = service;
+                    _textPanelService = textPanelService;
+                }
+                public void Apply(Program program) {
+                    StringBuilder sb = new StringBuilder();
+                    sb.AppendLine("--Ingots--");
+                    foreach (var p in _service.Ingots) {
+                        sb.AppendLine(p.Key + ":" + p.Value.ToIntSafe());
+                    }
+                    _textPanelService.send("Ingot", sb.ToString());
+                    sb.Clear();
+                    sb.AppendLine("--Ores--");
+                    foreach (var p in _service.Ores) {
+                        sb.AppendLine(p.Key + ":" + p.Value.ToIntSafe());
+                    }
+                    _textPanelService.send("Ore", sb.ToString());
+                    sb.Clear();
+                    sb.AppendLine("--Components--");
+                    foreach (var p in _service.Components) {
+                        sb.AppendLine(p.Key + ":" + p.Value.ToIntSafe());
+                    }
+                    _textPanelService.send("Component", sb.ToString());
+                }
+
             }
             //initialize Controllers
             List<IController> _controllers = new List<IController>();
             public void initControllers() {
                 _controllers.Add(new BatteryController(_batteryService, _textPanelService));
+                _controllers.Add(new ItemListController(_itemListService, _textPanelService));
+                _controllers.Add(new CargoContainerController(_cargoContainerService, _textPanelService));
             }
             //method
             public void ApplyAllController(Program program) {
