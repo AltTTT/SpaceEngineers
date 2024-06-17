@@ -109,6 +109,7 @@ namespace MyBaseController {
                     get { return ImmutableList.ToImmutableList(_batteries); }
                 }
                 public void Load(Program program) {
+                    _batteries.Clear();
                     program.GridTerminalSystem.GetBlocksOfType(
                         _batteries,
                         battery => battery.IsSameConstructAs(program.Me)
@@ -122,6 +123,7 @@ namespace MyBaseController {
                     get { return ImmutableList.ToImmutableList(_textPanels); }
                 }
                 public void Load(Program program) {
+                    _textPanels.Clear();
                     program.GridTerminalSystem.GetBlocksOfType(
                         _textPanels,
                         textpanel => textpanel.IsSameConstructAs(program.Me)
@@ -136,6 +138,7 @@ namespace MyBaseController {
                     get { return ImmutableList.ToImmutableList(_terminalBlocks); }
                 }
                 public void Load(Program program) {
+                    _terminalBlocks.Clear();
                     program.GridTerminalSystem.GetBlocksOfType(
                         _terminalBlocks,
                         b => b.IsSameConstructAs(program.Me) && b.HasInventory);
@@ -159,6 +162,7 @@ namespace MyBaseController {
                     get { return ImmutableList.ToImmutableList(_cargos); }
                 }
                 public void Load(Program program) {
+                    _cargos.Clear();
                     program.GridTerminalSystem.GetBlocksOfType(
                         _cargos,
                         cargo => cargo.IsSameConstructAs(program.Me)
@@ -175,6 +179,7 @@ namespace MyBaseController {
                     }
                 }
                 public void Load(Program program) {
+                    _assemblers.Clear();
                     program.GridTerminalSystem.GetBlocksOfType(
                         _assemblers,
                         assembler => assembler.IsSameConstructAs(program.Me)
@@ -344,7 +349,7 @@ namespace MyBaseController {
                                             break;
                                         }
                                     default: {
-                                            program.Echo("invalid item type : " + item.Type.ToString());
+                                            //program.Echo("invalid item type : " + item.Type.ToString());
                                             break;
                                         }
                                 }
@@ -413,7 +418,7 @@ namespace MyBaseController {
                 public void Update(Program program) {
                     _queuedItems.Clear();
                     foreach (var a in _repository.Assemblers) {
-                        if (!a.CooperativeMode) {
+                        if (!a.CooperativeMode && a.BlockDefinition.ToString() != "MyObjectBuilder_SurvivalKit/SurvivalKitLarge") {
                             _mainAssembler = a;
                         }
                         _items.Clear();
@@ -426,6 +431,7 @@ namespace MyBaseController {
                             }
                         }
                     }
+                    program.Echo(_mainAssembler.BlockDefinition.ToString());
                 }
 
             }
@@ -656,11 +662,23 @@ namespace MyBaseController {
 
         }
         private BeanProvider _beanProvider;
+        private IEnumerator<bool> _loadAllRepositoryEveryCycle;
+        private IEnumerator<bool> LoadAllRepositoryEveryCycle() {
+            int cycleMin = 1;
+            while (true) {
+                for (int i = 0; i < cycleMin * 10 * 60; i++) {
+                    yield return true;
+                }
+                _beanProvider.LoadAllRepository(this);
+                yield return true;
+            }
+        }
         public Program() {
             _beanProvider = new BeanProvider();
             _beanProvider.InitAll(this);
 
             Runtime.UpdateFrequency = UpdateFrequency.Update100;
+            _loadAllRepositoryEveryCycle = LoadAllRepositoryEveryCycle();
 
             test();
         }
@@ -668,10 +686,15 @@ namespace MyBaseController {
 
         public void Save() { }
 
+        private void Update100() {
+            _beanProvider.UpdateAll(this);
+            _loadAllRepositoryEveryCycle.MoveNext();
+        }
+
 
         public void Main(string argument, UpdateType updateSource) {
             if ((updateSource & UpdateType.Update100) != 0) {
-                _beanProvider.UpdateAll(this);
+                Update100();
             } else if ((updateSource & UpdateType.Terminal) != 0) {
                 _beanProvider.ExecQuery(this, argument);
             }
