@@ -356,17 +356,6 @@ namespace MyBaseController {
                             }
                         }
                     }
-                    /*
-                    foreach (var p in _ingots) {
-                        program.Echo(p.ToString());
-                    }
-                    foreach (var p in _ores) {
-                        program.Echo(p.ToString());
-                    }
-                    foreach (var p in _components) {
-                        program.Echo(p.ToString());
-                    }
-                    */
                 }
             }
             private class CustomDataService : IService {
@@ -418,7 +407,9 @@ namespace MyBaseController {
                 public void Update(Program program) {
                     _queuedItems.Clear();
                     foreach (var a in _repository.Assemblers) {
-                        if (!a.CooperativeMode && a.BlockDefinition.ToString() != "MyObjectBuilder_SurvivalKit/SurvivalKitLarge") {
+                        if (!a.CooperativeMode
+                        && a.BlockDefinition.ToString() != "MyObjectBuilder_SurvivalKit/SurvivalKitLarge"
+                        && !a.Repeating) {
                             _mainAssembler = a;
                         }
                         _items.Clear();
@@ -431,7 +422,7 @@ namespace MyBaseController {
                             }
                         }
                     }
-                    program.Echo(_mainAssembler.BlockDefinition.ToString());
+                    //program.Echo(_mainAssembler.BlockDefinition.ToString());
                 }
 
             }
@@ -663,12 +654,13 @@ namespace MyBaseController {
         }
         private BeanProvider _beanProvider;
         private IEnumerator<bool> _loadAllRepositoryEveryCycle;
-        private IEnumerator<bool> LoadAllRepositoryEveryCycle() {
+        private IEnumerator<bool> LoadAllRepositoryEveryCycle(Program program) {
             int cycleMin = 1;
             while (true) {
-                for (int i = 0; i < cycleMin * 10 * 60; i++) {
+                for (int i = 0; i < cycleMin * 60 * 60 / 100; i++) {
                     yield return true;
                 }
+                program.Echo("LoadAllRepository!");
                 _beanProvider.LoadAllRepository(this);
                 yield return true;
             }
@@ -678,7 +670,7 @@ namespace MyBaseController {
             _beanProvider.InitAll(this);
 
             Runtime.UpdateFrequency = UpdateFrequency.Update100;
-            _loadAllRepositoryEveryCycle = LoadAllRepositoryEveryCycle();
+            _loadAllRepositoryEveryCycle = LoadAllRepositoryEveryCycle(this);
 
             test();
         }
